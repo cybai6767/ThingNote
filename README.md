@@ -27,15 +27,11 @@
 
 本仓库公开应用源码、APK 下载和版本更新。签名密钥、密码、本地配置与用户数据不包含在源码中。
 
-## 原项目与改版说明
+## 来源与许可
 
-记物本基于 [keke-han/expiry-alarm-android（到期闹钟）](https://github.com/keke-han/expiry-alarm-android) 修改。
+基于 Han Yongliang（keke-han）的 [expiry-alarm-android](https://github.com/keke-han/expiry-alarm-android) 修改。
 
-原作者为 **Han Yongliang（[keke-han](https://github.com/keke-han)）**。感谢原作者提供的开源基础。
-
-本改版由 **[cybai6767](https://github.com/cybai6767)** 维护，主要增加物品管理、四个底部导航页面、自定义分类与拖动排序、资产和日均成本统计，并调整界面、图标与金额输入，移除语音输入。
-
-本项目继续采用 **[MIT License](LICENSE)**，保留原作者版权声明和完整许可证。第三方组件各自的许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+采用 [MIT License](LICENSE)，保留原作者版权声明和许可证文本。第三方组件许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 技术栈与构建
 
