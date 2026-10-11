@@ -24,6 +24,16 @@ internal const val CATEGORY_DELETE = "control:delete"
 internal fun categoryBarId(label: String): String = "category:$label"
 internal fun categoryBarLabel(id: String): String = id.removePrefix("category:")
 
+internal fun overviewCategoryLabels(items: List<ExpiryItem>, hidden: List<String>, barOrder: List<String>): List<String> =
+    orderedCategories(items.map { it.categoryLabel }.distinct().filterNot { it in hidden },
+        barOrder.filter { it.startsWith("category:") }.map(::categoryBarLabel))
+
+internal fun reorderVisibleCategoryBar(barOrder: List<String>, visibleOrder: List<String>): List<String> {
+    val ids = visibleOrder.distinct().map(::categoryBarId)
+    val remaining = ids.iterator()
+    return barOrder.map { if (it in ids) remaining.next() else it }
+}
+
 internal fun orderedCategoryBar(categories: List<String>, savedOrder: List<String>): List<String> {
     val labels = categories.distinct().map(::categoryBarId)
     val defaults = listOf(CATEGORY_ALL) + labels + listOf(CATEGORY_ADD, CATEGORY_DELETE)

@@ -8,6 +8,26 @@ import java.time.LocalDate
 import java.time.YearMonth
 
 class ExpiryFeaturesTest {
+    @Test
+    fun overviewCategoriesOnlyUseExistingItemLabelsAndRespectHiddenOrder() {
+        val digital = ExpiryItem("a", "手机", "2028-01-01", 30, "2026-01-01", category = ItemCategory.Digital)
+        val other = digital.copy(id = "b", category = ItemCategory.Other, lifecycle = ItemLifecycle.Completed)
+        val custom = digital.copy(id = "c", customCategory = "收藏")
+        assertEquals(listOf("其他", "数码家电"), overviewCategoryLabels(
+            listOf(digital, other, custom), listOf("收藏"),
+            listOf(CATEGORY_ADD, categoryBarId("其他"), categoryBarId("数码家电"))))
+        assertEquals(emptyList<String>(), overviewCategoryLabels(emptyList(), emptyList(), emptyList()))
+    }
+
+    @Test
+    fun overviewReorderPreservesButtonsAndUnusedCategoryPositions() {
+        val original = listOf(CATEGORY_DELETE, categoryBarId("数码家电"), CATEGORY_ALL,
+            categoryBarId("空分类"), categoryBarId("其他"), CATEGORY_ADD)
+        assertEquals(listOf(CATEGORY_DELETE, categoryBarId("其他"), CATEGORY_ALL,
+            categoryBarId("空分类"), categoryBarId("数码家电"), CATEGORY_ADD),
+            reorderVisibleCategoryBar(original, listOf("其他", "数码家电")))
+    }
+
     private val items = listOf(
         ExpiryItem("1", "护照", "2026-10-20", 30, "2026-09-01"),
         ExpiryItem("2", "牛奶", "2026-09-15", 3, "2026-09-01"),

@@ -37,7 +37,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
@@ -52,8 +51,6 @@ import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -66,7 +63,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -102,13 +98,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.zIndex
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -145,8 +139,6 @@ private fun DaoQiJiApp() {
     var settings by remember { mutableStateOf(settingsRepository.load()) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    var input by remember { mutableStateOf("") }
-    var priceInput by remember { mutableStateOf<String?>(null) }
     var items by remember { mutableStateOf(repository.getAll()) }
     var editingItem by remember { mutableStateOf<ExpiryItem?>(null) }
     var selectedTab by remember { mutableStateOf(AppTab.Overview) }
@@ -154,9 +146,7 @@ private fun DaoQiJiApp() {
     var customCategories by remember { mutableStateOf(repository.getCustomCategories()) }
     var categoryOrder by remember { mutableStateOf(repository.getCategoryBarOrder()) }
     var hiddenCategories by remember { mutableStateOf(repository.getHiddenCategories()) }
-    var addCategory by remember { mutableStateOf<String?>(null) }
     val overviewListState = rememberLazyListState()
-    val addListState = rememberLazyListState()
     val mineListState = rememberLazyListState()
     val settingsScrollState = rememberScrollState()
     var showPrivacyConsent by remember { mutableStateOf(!settings.privacyAccepted) }
@@ -164,9 +154,6 @@ private fun DaoQiJiApp() {
     var expiryFilter by remember { mutableStateOf(ExpiryFilter.All) }
     var homeView by remember { mutableStateOf(HomeView.List) }
     var notificationAllowed by remember { mutableStateOf(NotificationHelper.canNotify(context)) }
-    val parsedInput = remember(input, priceInput, settings.defaultRemindBeforeDays) {
-        ExpiryParser.parse(input, settings.defaultRemindBeforeDays)?.withPriceInput(priceInput)
-    }
     val dark = when (settings.theme) {
         ThemeChoice.System -> isSystemInDarkTheme()
         ThemeChoice.Light -> false
@@ -356,10 +343,11 @@ private fun DaoQiJiApp() {
                     modifier = Modifier.fillMaxSize().padding(padding),
                     scrollState = settingsScrollState
                 )
+            } else if (selectedTab == AppTab.Add) {
+                Box(Modifier.fillMaxSize().padding(padding))
             } else LazyColumn(
                 state = when (selectedTab) {
                     AppTab.Overview -> overviewListState
-                    AppTab.Add -> addListState
                     else -> mineListState
                 },
                 modifier = Modifier
@@ -382,64 +370,27 @@ private fun DaoQiJiApp() {
                         )
                     }
                     item {
-                        CategoryOverview(items = items, customCategories = customCategories,
-                            hiddenCategories = hiddenCategories, onCategory = {
+                        CategoryOverview(items = items, savedOrder = categoryOrder,
+                            hiddenCategories = hiddenCategories,
+                            onReorder = { visibleOrder ->
+                                val barOrder = orderedCategoryBar(
+                                    (items.map { it.categoryLabel } + customCategories).distinct()
+                                        .filterNot { it in hiddenCategories }, categoryOrder)
+                                categoryOrder = reorderVisibleCategoryBar(barOrder, visibleOrder)
+                                repository.saveCategoryBarOrder(categoryOrder)
+                            },
+                            onDelete = {
+                                repository.hideCategory(it)
+                                hiddenCategories = repository.getHiddenCategories()
+                                categoryOrder = repository.getCategoryBarOrder()
+                                if (categoryFilter == it) categoryFilter = null
+                            }, onCategory = {
                             categoryFilter = it
                             expiryFilter = ExpiryFilter.All
                             searchQuery = ""
                             selectedTab = AppTab.Mine
                         })
                     }
-                }
-                if (selectedTab == AppTab.Add) {
-                    item {
-                        QuickTemplates(onSelect = {
-                            input = templateInput(it)
-                            priceInput = null
-                            addCategory = null
-                        })
-                    }
-
-                    item {
-                        InputWorkspace(
-                            input = input,
-                            parsed = parsedInput,
-                            priceInput = priceInput ?: parsedInput?.price?.let { java.math.BigDecimal.valueOf(it).stripTrailingZeros().toPlainString() }.orEmpty(),
-                            priceError = !isValidPriceInput(priceInput),
-                            category = addCategory,
-                            customCategories = customCategories,
-                            onCategoryChange = { addCategory = it },
-                            onCategoryCreate = { createCategory(it) },
-                            onPriceChange = { priceInput = it },
-                            onInputChange = { input = it },
-                            onClear = { input = ""; priceInput = null; addCategory = null },
-                            onAddClick = {
-                                val parsed = parsedInput
-                                if (!isValidPriceInput(priceInput)) {
-                                    scope.launch { snackbarHostState.showSnackbar("金额请输入非负数字，最多两位小数") }
-                                } else if (parsed == null) {
-                                    scope.launch { snackbarHostState.showSnackbar("没识别到有效日期") }
-                                } else {
-                                    repository.add(parsed, addCategory)
-                                    ReminderScheduler.scheduleDailyCheck(context)
-                                    refreshItems()
-                                    input = ""
-                                    priceInput = null
-                                    addCategory = null
-                                    scope.launch {
-                                        val result = snackbarHostState.showSnackbar("已添加：${parsed.title}", actionLabel = "查看")
-                                        if (result == SnackbarResult.ActionPerformed) {
-                                            searchQuery = ""
-                                            categoryFilter = null
-                                            expiryFilter = ExpiryFilter.All
-                                            selectedTab = AppTab.Mine
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                    }
-
                 }
                 if (selectedTab == AppTab.Mine) {
                     item {
@@ -528,147 +479,6 @@ private fun DaoQiJiApp() {
                 },
             )
         }
-    }
-}
-
-@Composable
-private fun InputWorkspace(
-    input: String,
-    parsed: ParsedExpiry?,
-    priceInput: String,
-    priceError: Boolean,
-    category: String?,
-    customCategories: List<String>,
-    onCategoryChange: (String?) -> Unit,
-    onCategoryCreate: (String) -> Unit,
-    onPriceChange: (String) -> Unit,
-    onInputChange: (String) -> Unit,
-    onClear: () -> Unit,
-    onAddClick: () -> Unit
-) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text(
-            text = "添加物品",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "一句话输入物品、金额和过保时间，金额也可单独填写",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        OutlinedTextField(
-            value = input,
-            onValueChange = onInputChange,
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 3,
-            maxLines = 3,
-            placeholder = { Text("例如：手机3999元，2027年3月1日过保，提前30天和7天提醒") },
-            shape = RoundedCornerShape(8.dp)
-        )
-
-        OutlinedTextField(
-            value = priceInput,
-            onValueChange = onPriceChange,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("金额（可选）") },
-            placeholder = { Text("例如：103.55") },
-            prefix = { Text("¥") },
-            supportingText = {
-                Text(if (priceError) "请输入非负数字，最多两位小数"
-                    else "自动回填识别金额，可手动修改；清空则不记录金额")
-            },
-            isError = priceError,
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            shape = RoundedCornerShape(8.dp)
-        )
-
-        CategorySelectionField(selected = category, customCategories = customCategories,
-            onSelect = onCategoryChange, onCreate = onCategoryCreate, allowAutomatic = true)
-
-        if (parsed != null) {
-            ParsedConfirmation(parsed = parsed)
-        }
-
-        if (input.isNotBlank() || priceInput.isNotBlank()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                TextButton(onClick = onClear) {
-                    Text("清空输入")
-                }
-            }
-        }
-
-        Button(
-            onClick = onAddClick,
-            enabled = input.isNotBlank() && !priceError,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Text("确认添加", fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-@Composable
-private fun ParsedConfirmation(parsed: ParsedExpiry) {
-    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-    val green = if (dark) Color(0xFF62D694) else Color(0xFF1F8A4C)
-    Card(
-        colors = CardDefaults.cardColors(containerColor = if (dark) Color(0xFF18261F) else Color(0xFFF5FAF7)),
-        border = BorderStroke(1.dp, if (dark) Color(0xFF304B3C) else Color(0xFFD8EEE0)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = RoundedCornerShape(8.dp)
-    ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = null,
-                    tint = green
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("已识别", color = green, fontWeight = FontWeight.SemiBold)
-            }
-            Spacer(Modifier.height(10.dp))
-            ParsedRow(label = "事项", value = parsed.title)
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            ParsedRow(label = "到期时间", value = parsed.expireDate)
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            ParsedRow(label = "金额", value = parsed.price?.let { formatPrice(it) } ?: "未填写（可选）")
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            ParsedRow(
-                label = "提前提醒",
-                value = (listOf(parsed.remindBeforeDays) + parsed.additionalRemindBeforeDays)
-                    .distinct().joinToString(" / ") { "${it}天" }
-            )
-            if (parsed.repeatRule == RepeatRule.Yearly) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                ParsedRow(label = "重复", value = parsed.repeatRule.label)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ParsedRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.width(16.dp))
-        Text(value, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -1034,51 +844,6 @@ private fun ExpiryOverviewPanel(
 }
 
 @Composable
-private fun CategoryOverview(items: List<ExpiryItem>, customCategories: List<String>,
-    hiddenCategories: List<String>, onCategory: (String) -> Unit) {
-    val visibleCategories = (ItemCategory.entries.map { it.label } + customCategories)
-        .distinct().filterNot { it in hiddenCategories }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("物品分类", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text("未处理物品 · 点击分类查看", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (visibleCategories.isEmpty()) {
-            Text("暂无分类，可在“我的”页面通过＋新增", style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        visibleCategories.chunked(2).forEach { categories ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                categories.forEach { category ->
-                    val categoryItems = items.filter { it.categoryLabel == category && it.lifecycle == ItemLifecycle.Active }
-                    Surface(
-                        modifier = Modifier.weight(1f).clickable { onCategory(category) },
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                    ) {
-                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(category, style = MaterialTheme.typography.bodyMedium)
-                            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(categoryItems.size.toString(),
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                Text("件", style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Text(formatPrice(categoryItems.sumOf { it.price ?: 0.0 }),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-                if (categories.size == 1) Spacer(Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
 private fun CategoryFilters(selected: String?, categories: List<String>, savedOrder: List<String>,
     hiddenCategories: List<String>, onSelect: (String?) -> Unit, onCreate: (String) -> Unit,
     onDelete: (String) -> Unit, onReorder: (List<String>) -> Unit) {
@@ -1300,34 +1065,6 @@ private fun OverviewMetric(
 }
 
 @Composable
-private fun QuickTemplates(onSelect: (ItemCategory) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("快捷添加", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ItemCategory.entries.filterNot { it == ItemCategory.Other }.forEach { category ->
-                FilterChip(
-                    selected = false,
-                    onClick = { onSelect(category) },
-                    label = { Text(category.label) }
-                )
-            }
-        }
-    }
-}
-
-private fun templateInput(category: ItemCategory): String = when (category) {
-    ItemCategory.Digital -> "手机3999元，2027年3月1日过保，提前30天和7天提醒"
-    ItemCategory.Furniture -> "沙发2499元，2027年6月30日过保，提前30天提醒"
-    ItemCategory.Clothing -> "羽绒服599元，2026年12月31日过保，提前7天提醒"
-    ItemCategory.Beauty -> "面霜199元，2026年10月15日过期，提前7天和1天提醒"
-    ItemCategory.Sports -> "跑鞋399元，2026年11月30日过保，提前7天提醒"
-    ItemCategory.Other -> "物品99元，2027年3月1日过保，提前7天提醒"
-}
-
-@Composable
 private fun PrivacyConsentDialog(
     onAccept: () -> Unit,
     onDecline: () -> Unit
@@ -1349,7 +1086,7 @@ private fun PrivacyConsentDialog(
     )
 }
 
-private fun formatPrice(price: Double): String {
+internal fun formatPrice(price: Double): String {
     val text = if (price == price.toLong().toDouble()) {
         "%,d".format(price.toLong())
     } else {
