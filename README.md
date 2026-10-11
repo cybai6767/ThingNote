@@ -1,82 +1,53 @@
-# 记物本
+# 记物本 · ThingNote
 
-一款本地优先的 Android 到期事项管理应用。用户可以用一句中文记录事项、到期日期和多个提前提醒时间。
+<img src="app-icon.png" width="112" alt="记物本图标">
 
-> 当前版本：`0.1.6`（`versionCode 7`）
->
-> 包名：`com.daoqiji.app`
->
-> Developer: Han Yongliang
+一款简约的本地物品记录与保修到期提醒应用。
 
-## 主要功能
+## 下载
 
-- 一句话解析事项、年月日和多个提醒点。
-- 概览、添加、我的、设置四个导航页面，支持物品分类与快捷添加。
-- 支持自定义分类、标签拖动排序及隐藏分类标签，保留已有物品数据。
-- 提供在保中、30 天内过保、已过保和已处理概览。
-- 展示所有未处理物品的总资产、分类金额及日均成本；支持金额识别和手动填写。
-- 支持搜索、状态筛选、列表视图和按月日历视图。
-- 支持每年重复、事项续期及历史到期日期。
-- 支持 JSON 本地备份与恢复，无账号、广告、订阅或云同步。
+**[下载记物本 0.1.6 APK](https://github.com/cybai6767/ThingNote/releases/download/v0.1.6/ThingNote-0.1.6.apk)**
 
-## 应用截图
+[最新版本](https://github.com/cybai6767/ThingNote/releases/latest) · [全部版本](https://github.com/cybai6767/ThingNote/releases)
 
-| 多时间提醒 | 分类列表 | 续期历史 |
-| --- | --- | --- |
-| ![多时间提醒](release-materials/huawei/screenshots-0.1.5/01-multiple-reminders.png) | ![分类列表](release-materials/huawei/screenshots-0.1.5/02-category-list.png) | ![续期历史](release-materials/huawei/screenshots-0.1.5/04-renewal-history.png) |
+支持 Android 8.0 及以上。下载 APK 后在手机打开，按系统提示允许安装。
 
-## 技术栈
+## 功能
 
-- Kotlin + Jetpack Compose + Material 3
-- Android Gradle Plugin 9.2.1 / Gradle 9.5.1
-- Java 17
-- `minSdk 26` / `targetSdk 35` / `compileSdk 36`
+- 概览：查看在保、即将过保、已过保和已处理物品，以及总资产、日均成本和分类金额。
+- 添加：一句话识别物品、到期日期、金额及提醒时间，也支持快捷添加和手动填写。
+- 我的：搜索、分类筛选、列表与日历视图，自定义分类和拖动排序。
+- 设置：外观、提醒以及本地备份导出与恢复。
 
-## 本地构建
+总资产统计所有未处理物品，包含已过保物品。单件日均成本为金额除以已持有天数，购买当天按 1 天；概览汇总可计算物品的日均成本。
 
-准备 Android SDK 36 和 JDK 17，然后在项目根目录执行：
+## 数据
+
+物品数据保存在本机。应用无账号、广告或云同步，建议定期导出本地备份。
+
+本仓库公开应用源码、APK 下载和版本更新。签名密钥、密码、本地配置与用户数据不包含在源码中。
+
+## 原项目与改版说明
+
+记物本基于 [keke-han/expiry-alarm-android（到期闹钟）](https://github.com/keke-han/expiry-alarm-android) 修改。
+
+原作者为 **Han Yongliang（[keke-han](https://github.com/keke-han)）**。感谢原作者提供的开源基础。
+
+本改版由 **[cybai6767](https://github.com/cybai6767)** 维护，主要增加物品管理、四个底部导航页面、自定义分类与拖动排序、资产和日均成本统计，并调整界面、图标与金额输入，移除语音输入。
+
+本项目继续采用 **[MIT License](LICENSE)**，保留原作者版权声明和完整许可证。第三方组件各自的许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## 技术栈与构建
+
+Android 原生应用，使用 Kotlin、Jetpack Compose、Material 3 和 Gradle。支持 Android 8.0 及以上，编译 SDK 为 36。
+
+配置 Android SDK 和 JDK 后，在项目根目录执行：
 
 ```bash
 ./gradlew assembleDebug
+./gradlew testReleaseUnitTest
 ```
 
-安装调试版到已连接设备：
+Windows 使用 `gradlew.bat` 替代 `./gradlew`。生成的调试 APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
 
-```bash
-./gradlew installDebug
-```
-
-运行本地单元测试：
-
-```bash
-./gradlew test
-```
-
-Debug 构建不需要签名文件。如需生成正式包，请参考 [`keystore/daoqiji-release.properties.example`](keystore/daoqiji-release.properties.example)，并在本地配置自己的签名证书。真实证书和密码文件已被 `.gitignore` 排除。
-
-## 项目结构
-
-```text
-app/src/main/          应用源码和资源
-app/src/test/          日期解析、提醒和备份测试
-docs/                  设计与真机验证记录
-release-materials/     应用商店文案、图标、截图和测试报告
-```
-
-## 数据与权限
-
-- `POST_NOTIFICATIONS`：Android 13 及以上用于发送到期提醒。
-- `RECEIVE_BOOT_COMPLETED`：设备重启后恢复已设置的提醒。
-
-完整说明见[隐私政策](https://keke-han.github.io/expiry-alarm-privacy/)。
-
-## 文档
-
-- [版本记录](CHANGELOG.md)
-- [第三方软件说明](THIRD_PARTY_NOTICES.md)
-- [APK 测试说明](docs/APK_TESTING.md)
-- [安全问题反馈](SECURITY.md)
-
-## 版权
-
-本项目基于 [MIT License](LICENSE) 开源，Copyright (c) 2026 Han Yongliang。第三方组件仍适用其各自许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+正式版签名配置参考 [keystore/daoqiji-release.properties.example](keystore/daoqiji-release.properties.example)。实际签名文件与密码仅保留本地，已加入 `.gitignore`。
