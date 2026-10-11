@@ -50,12 +50,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import java.time.LocalDate
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun CategoryOverview(
-    items: List<ExpiryItem>, savedOrder: List<String>, hiddenCategories: List<String>,
+    items: List<ExpiryItem>, savedOrder: List<String>, hiddenCategories: List<String>, today: LocalDate,
     onCategory: (String) -> Unit, onReorder: (List<String>) -> Unit, onDelete: (String) -> Unit
 ) {
     val categories = overviewCategoryLabels(items, hiddenCategories, savedOrder)
@@ -86,7 +87,7 @@ internal fun CategoryOverview(
         Layout(modifier = Modifier.fillMaxWidth(), content = {
             categories.forEach { category ->
                 key(category) {
-                    val categoryItems = items.filter { it.categoryLabel == category && it.lifecycle == ItemLifecycle.Active }
+                    val categoryItems = items.filter { it.categoryLabel == category && !it.isCompleted(today) }
                     Box(Modifier.zIndex(if (dragged == category) 1f else 0f).onGloballyPositioned {
                         positions[category] = Rect(it.positionInRoot(), Size(it.size.width.toFloat(), it.size.height.toFloat()))
                     }) {

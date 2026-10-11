@@ -140,6 +140,7 @@ private fun DaoQiJiApp() {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf(repository.getAll()) }
+    var addDraft by remember { mutableStateOf(ItemDraft()) }
     var editingItem by remember { mutableStateOf<ExpiryItem?>(null) }
     var selectedTab by remember { mutableStateOf(AppTab.Overview) }
     var categoryFilter by remember { mutableStateOf<String?>(null) }
@@ -153,6 +154,13 @@ private fun DaoQiJiApp() {
     var searchQuery by remember { mutableStateOf("") }
     var expiryFilter by remember { mutableStateOf(ExpiryFilter.All) }
     var homeView by remember { mutableStateOf(HomeView.List) }
+    var today by remember { mutableStateOf(LocalDate.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60000)
+            today = LocalDate.now()
+        }
+    }
     var notificationAllowed by remember { mutableStateOf(NotificationHelper.canNotify(context)) }
     val dark = when (settings.theme) {
         ThemeChoice.System -> isSystemInDarkTheme()
@@ -166,6 +174,7 @@ private fun DaoQiJiApp() {
     DisposableEffect(activity) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                today = LocalDate.now()
                 notificationAllowed = NotificationHelper.canNotify(context)
             }
         }
@@ -344,7 +353,20 @@ private fun DaoQiJiApp() {
                     scrollState = settingsScrollState
                 )
             } else if (selectedTab == AppTab.Add) {
-                Box(Modifier.fillMaxSize().padding(padding))
+                ItemForm(draft = addDraft, onChange = { addDraft = it },
+                    categories = (items.map { it.categoryLabel } + customCategories).distinct().filterNot { it in hiddenCategories },
+                    onCreateCategory = { createCategory(it) },
+                    onSave = {
+                        repository.add(it)
+                        refreshItems()
+                        ReminderScheduler.scheduleDailyCheck(context)
+                        addDraft = ItemDraft()
+                        selectedTab = AppTab.Mine
+                        expiryFilter = if (it.isCompleted(today)) ExpiryFilter.Completed else ExpiryFilter.All
+                        categoryFilter = null
+                        searchQuery = ""
+                        scope.launch { snackbarHostState.showSnackbar("物品已保存") }
+                    }, modifier = Modifier.fillMaxSize().padding(padding))
             } else LazyColumn(
                 state = when (selectedTab) {
                     AppTab.Overview -> overviewListState
@@ -360,7 +382,7 @@ private fun DaoQiJiApp() {
                     item {
                         Spacer(Modifier.height(2.dp))
                         ExpiryOverviewPanel(
-                            overview = expiryOverview(items),
+                            overview = expiryOverview(items, today),
                             onFilter = {
                                 expiryFilter = it
                                 categoryFilter = null
@@ -370,7 +392,7 @@ private fun DaoQiJiApp() {
                         )
                     }
                     item {
-                        CategoryOverview(items = items, savedOrder = categoryOrder,
+                        CategoryOverview(items = items, savedOrder = categoryOrder, today = today,
                             hiddenCategories = hiddenCategories,
                             onReorder = { visibleOrder ->
                                 val barOrder = orderedCategoryBar(
@@ -425,18 +447,25 @@ private fun DaoQiJiApp() {
                         )
                     }
 
-                    val visibleItems = filterExpiryItems(items, searchQuery, expiryFilter, categoryLabel = categoryFilter)
+                    val visibleItems = filterExpiryItems(items, searchQuery, expiryFilter, today = today, categoryLabel = categoryFilter)
                     if (visibleItems.isEmpty()) {
                         item { EmptyState(hasItems = items.isNotEmpty()) }
                     } else if (homeView == HomeView.List) {
                         items(visibleItems, key = { it.id }) { item ->
-                            ExpiryItemRow(item = item, onClick = { editingItem = item })
+                            ExpiryItemRow(item = item, today = today, onClick = { editingItem = item })
                         }
                     } else {
-                        groupExpiryItemsByMonth(visibleItems).forEach { (month, monthItems) ->
+                        groupExpiryItemsByMonth(visibleItems, today).forEach { (month, monthItems) ->
                             item(key = "month-$month") { CalendarMonthHeader(month) }
                             items(monthItems, key = { "calendar-${it.id}" }) { item ->
-                                ExpiryItemRow(item = item, onClick = { editingItem = item })
+                                ExpiryItemRow(item = item, today = today, onClick = { editingItem = item })
+                            }
+                        }
+                        val undated = visibleItems.filter { it.expireDate.isBlank() }
+                        if (undated.isNotEmpty()) {
+                            item(key = "no-expiry") { Text("未设置过保日期", fontWeight = FontWeight.SemiBold) }
+                            items(undated, key = { "undated-${it.id}" }) { item ->
+                                ExpiryItemRow(item = item, today = today, onClick = { editingItem = item })
                             }
                         }
                     }
@@ -444,19 +473,15 @@ private fun DaoQiJiApp() {
             }
         }
         editingItem?.let { item ->
-            EditItemDialog(
+            EditItemForm(
                 item = item,
-                customCategories = customCategories,
-                onCategoryCreate = { createCategory(it) },
+                categories = (items.map { it.categoryLabel } + customCategories).distinct().filterNot { it in hiddenCategories },
+                onCreateCategory = { createCategory(it) },
                 onDismiss = { editingItem = null },
                 onSave = {
                     repository.update(it)
                     refreshItems()
-                    editingItem = null
-                },
-                onComplete = {
-                    repository.update(item.copy(lifecycle = ItemLifecycle.Completed))
-                    refreshItems()
+                    ReminderScheduler.scheduleDailyCheck(context)
                     editingItem = null
                 },
                 onDelete = {
@@ -572,6 +597,7 @@ private fun EmptyState(hasItems: Boolean) {
 @Composable
 private fun ExpiryItemRow(
     item: ExpiryItem,
+    today: LocalDate,
     onClick: () -> Unit
 ) {
     Column {
@@ -586,10 +612,15 @@ private fun ExpiryItemRow(
                 modifier = Modifier
                     .size(10.dp)
                     .clip(CircleShape),
-                color = item.status().statusColor(),
+                color = item.status(today).statusColor(),
                 content = {}
             )
             Spacer(Modifier.width(12.dp))
+            rememberItemPhoto(item.imageBase64)?.let { photo ->
+                androidx.compose.foundation.Image(photo, "${item.title}图片", Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                Spacer(Modifier.width(10.dp))
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.title,
@@ -614,8 +645,8 @@ private fun ExpiryItemRow(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = if (item.lifecycle == ItemLifecycle.Completed) "已处理" else compactRemainingText(item),
-                        color = if (item.lifecycle == ItemLifecycle.Completed) Color(0xFF8E8E93) else item.status().statusColor(),
+                        text = if (item.isCompleted(today)) "已处理" else compactRemainingText(item, today),
+                        color = if (item.isCompleted(today)) Color(0xFF8E8E93) else item.status(today).statusColor(),
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         softWrap = false
@@ -624,11 +655,13 @@ private fun ExpiryItemRow(
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = buildString {
-                        append(item.expireDate)
-                        item.heldDays()?.let { append(" · 已持有${it}天") }
+                        append(item.expireDate.ifBlank { "未设置过保日期" })
+                        item.heldDays(today)?.let { append(" · 已持有${it}天") }
                         item.price?.let { append(" · ${formatPrice(it)}") }
-                        append(" · ")
-                        append(item.allReminderDays().joinToString("/") { "${it}天" })
+                        if (item.expireDate.isNotBlank() && item.allReminderDays().isNotEmpty()) {
+                            append(" · 提前")
+                            append(item.allReminderDays().joinToString("/") { "${it}天" })
+                        }
                         if (item.repeatRule == RepeatRule.Yearly) append(" · 每年")
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -636,7 +669,11 @@ private fun ExpiryItemRow(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = item.dailyCost()?.let { "${formatPrice(it)}/天" } ?: "日均成本：暂无法计算",
+                    text = when (item.costMethod) {
+                        CostMethod.Time -> item.dailyCost(today)?.let { "${formatPrice(it)}/天" } ?: "日均成本：暂无法计算（需有效价格和购买日期）"
+                        CostMethod.Count -> item.perUseCost()?.let { "${formatPrice(it)}/次 · 已使用${item.useCount}次" } ?: "单次成本：待补充价格或使用次数"
+                        CostMethod.None -> "不计算均价"
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -650,162 +687,6 @@ private fun ExpiryItemRow(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
-}
-
-@Composable
-private fun EditItemDialog(
-    item: ExpiryItem,
-    customCategories: List<String>,
-    onCategoryCreate: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onSave: (ExpiryItem) -> Unit,
-    onComplete: () -> Unit,
-    onDelete: () -> Unit
-) {
-    var title by remember(item.id) { mutableStateOf(item.title) }
-    var date by remember(item.id) { mutableStateOf(item.expireDate) }
-    var purchaseDate by remember(item.id) { mutableStateOf(item.purchaseDate.orEmpty()) }
-    var warrantyMonths by remember(item.id) {
-        mutableStateOf(if (item.warrantyMonths > 0) item.warrantyMonths.toString() else "")
-    }
-    var price by remember(item.id) {
-        mutableStateOf(
-            item.price?.let {
-                if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString()
-            }.orEmpty()
-        )
-    }
-    var remindDays by remember(item.id) { mutableStateOf(item.allReminderDays().joinToString(",")) }
-    var repeatYearly by remember(item.id) { mutableStateOf(item.repeatRule == RepeatRule.Yearly) }
-    var category by remember(item.id) { mutableStateOf<String?>(item.categoryLabel) }
-    var error by remember(item.id) { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("编辑物品") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("物品名称") },
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = date,
-                    onValueChange = { date = it },
-                    label = { Text("过保日 YYYY-MM-DD") },
-                    supportingText = { Text("留空则按购买日 + 保修月数自动计算") },
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = purchaseDate,
-                    onValueChange = { purchaseDate = it },
-                    label = { Text("购买日 YYYY-MM-DD（可选）") },
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = warrantyMonths,
-                    onValueChange = { warrantyMonths = it.filter(Char::isDigit) },
-                    label = { Text("保修月数（可选）") },
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = price,
-                    onValueChange = { input -> price = input.filter { it.isDigit() || it == '.' } },
-                    label = { Text("金额（可选）") },
-                    supportingText = { Text("例如：3000") },
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = remindDays,
-                    onValueChange = { remindDays = it.filter { char -> char.isDigit() || char in ",，、 " } },
-                    label = { Text("提醒天数，可填多个") },
-                    supportingText = { Text("例如：30,7,1") },
-                    singleLine = true
-                )
-                CategorySelectionField(selected = category, customCategories = customCategories,
-                    onSelect = { category = it }, onCreate = onCategoryCreate)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { repeatYearly = !repeatYearly },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(checked = repeatYearly, onCheckedChange = { repeatYearly = it })
-                    Text("每年重复")
-                }
-                if (item.renewalHistory.isNotEmpty()) {
-                    Text(
-                        "续期记录：${item.renewalHistory.joinToString(" → ")}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val days = remindDays.split(Regex("""[,\s，、]+"""))
-                        .mapNotNull(String::toIntOrNull).distinct()
-                    val months = warrantyMonths.toIntOrNull() ?: 0
-                    val priceValue = if (price.isBlank()) null else price.toDoubleOrNull()
-                    val validPurchase = purchaseDate.isBlank() ||
-                        runCatching { LocalDate.parse(purchaseDate) }.isSuccess
-                    val effectiveDate = date.ifBlank {
-                        purchaseDate.takeIf(String::isNotBlank)
-                            ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-                            ?.takeIf { months > 0 }
-                            ?.plusMonths(months.toLong())?.toString().orEmpty()
-                    }
-                    val validDate = runCatching { LocalDate.parse(effectiveDate) }.isSuccess
-                    error = when {
-                        title.isBlank() -> "物品名称不能为空"
-                        !validPurchase -> "购买日格式应为 YYYY-MM-DD"
-                        months !in 0..1200 -> "保修月数应为 0–1200"
-                        price.isNotBlank() && priceValue == null -> "金额格式不正确"
-                        !validDate -> "日期格式应为 YYYY-MM-DD"
-                        days.isEmpty() -> "提醒天数不能为空"
-                        days.any { it !in 0..3650 } -> "提醒天数应为 0–3650"
-                        item.lifecycle == ItemLifecycle.Completed && effectiveDate == item.expireDate -> "续期请填写新的到期日"
-                        else -> null
-                    }
-                    if (error == null) {
-                        val base = if (item.lifecycle == ItemLifecycle.Completed) item.renew(effectiveDate)
-                        else item.copy(expireDate = effectiveDate)
-                        onSave(base.copy(
-                            title = title.trim(),
-                            purchaseDate = purchaseDate.takeIf(String::isNotBlank),
-                            warrantyMonths = months,
-                            price = priceValue,
-                            remindBeforeDays = days.first(),
-                            additionalRemindBeforeDays = days.drop(1),
-                            repeatRule = if (repeatYearly) RepeatRule.Yearly else RepeatRule.None,
-                            category = ItemCategory.entries.firstOrNull { it.label == category } ?: ItemCategory.Other,
-                            customCategory = category?.takeIf { name -> ItemCategory.entries.none { it.label == name } }
-                        ))
-                    }
-                }
-            ) {
-                Text(if (item.lifecycle == ItemLifecycle.Completed) "续期" else "保存")
-            }
-        },
-        dismissButton = {
-            Row {
-                if (item.lifecycle == ItemLifecycle.Active) {
-                    TextButton(onClick = onComplete) { Text("已处理") }
-                }
-                TextButton(onClick = onDelete) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
-                }
-                TextButton(onClick = onDismiss) {
-                    Text("取消")
-                }
-            }
-        }
-    )
 }
 
 @Composable
@@ -836,7 +717,7 @@ private fun ExpiryOverviewPanel(
             }
         }
         Text(if (overview.dailyCostItemCount < overview.unprocessedCount)
-            "所有未处理物品 · 日均成本已计入${overview.dailyCostItemCount}/${overview.unprocessedCount}件（需金额和购买日）"
+            "所有未处理物品 · 日均成本已计入${overview.dailyCostItemCount}/${overview.unprocessedCount}件（需按时间计算、价格和购买日）"
             else "所有未处理物品（包含已过保）",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -983,22 +864,6 @@ private fun CategoryFilters(selected: String?, categories: List<String>, savedOr
 }
 
 @Composable
-private fun CategorySelectionField(selected: String?, customCategories: List<String>,
-    onSelect: (String?) -> Unit, onCreate: (String) -> Unit, allowAutomatic: Boolean = false) {
-    var showPicker by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { showPicker = true }, modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp)) {
-        Text("分类：${selected ?: "自动分类"}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-    if (showPicker) {
-        CategoryDialog(categories = (ItemCategory.entries.map { it.label } + customCategories).distinct(),
-            selected = selected, allowAutomatic = allowAutomatic,
-            onSelect = { onSelect(it); showPicker = false }, onCreate = onCreate,
-            onDismiss = { showPicker = false })
-    }
-}
-
-@Composable
 private fun CategoryDialog(categories: List<String>, selected: String?,
     onSelect: (String?) -> Unit, onCreate: (String) -> Unit, onDismiss: () -> Unit,
     allowAutomatic: Boolean = false, showExisting: Boolean = true,
@@ -1095,8 +960,8 @@ internal fun formatPrice(price: Double): String {
     return "¥$text"
 }
 
-private fun compactRemainingText(item: ExpiryItem): String {
-    val days = item.daysRemaining()
+private fun compactRemainingText(item: ExpiryItem, today: LocalDate): String {
+    val days = item.daysRemaining(today) ?: return "未设过保日"
     return when {
         days < 0 -> "已过保${-days}天"
         days == 0L -> "今天过保"
@@ -1110,6 +975,6 @@ private fun ExpiryStatus.statusColor(): Color {
         ExpiryStatus.Safe -> Color(0xFF34C759)
         ExpiryStatus.Soon -> Color(0xFFFFCC00)
         ExpiryStatus.Urgent -> Color(0xFFFF3B30)
-        ExpiryStatus.Expired -> Color(0xFF8E8E93)
+        ExpiryStatus.Expired, ExpiryStatus.NoWarranty -> Color(0xFF8E8E93)
     }
 }

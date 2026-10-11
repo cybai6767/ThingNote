@@ -1,8 +1,9 @@
 package com.daoqiji.app
 
 import android.content.Context
+import com.daoqiji.app.ExpiryBackup.toJson
+import com.daoqiji.app.ExpiryBackup.toExpiryItem
 import org.json.JSONArray
-import org.json.JSONObject
 import java.time.LocalDate
 import java.util.UUID
 
@@ -15,35 +16,9 @@ class ExpiryRepository(context: Context) {
         return buildList {
             for (index in 0 until items.length()) {
                 val json = items.optJSONObject(index) ?: continue
-                val title = json.optString("title")
-                add(
-                    ExpiryItem(
-                        id = json.optString("id"),
-                        title = title,
-                        expireDate = json.optString("expire_date"),
-                        remindBeforeDays = json.optInt("remind_before_days", 30),
-                        createdAt = json.optString("created_at"),
-                        purchaseDate = json.optString("purchase_date").takeIf(String::isNotBlank),
-                        warrantyMonths = json.optInt("warranty_months", 0),
-                        price = json.optDouble("price", 0.0).takeIf { it > 0.0 },
-                        repeatRule = RepeatRule.entries.firstOrNull {
-                            it.name == json.optString("repeat_rule")
-                        } ?: RepeatRule.None,
-                        category = ItemCategory.entries.firstOrNull {
-                            it.name == json.optString("category")
-                        } ?: inferCategory(title),
-                        additionalRemindBeforeDays = json.optJSONArray("additional_remind_before_days")
-                            ?.toIntList().orEmpty(),
-                        lifecycle = ItemLifecycle.entries.firstOrNull {
-                            it.name == json.optString("lifecycle")
-                        } ?: ItemLifecycle.Active,
-                        renewalHistory = json.optJSONArray("renewal_history")?.toStringList().orEmpty(),
-                        customCategory = json.optString("custom_category").takeIf(String::isNotBlank)
-                    )
-                )
+                runCatching { json.toExpiryItem() }.getOrNull()?.let { add(it) }
             }
-        }.filter { it.id.isNotBlank() && it.title.isNotBlank() && it.expireDate.isNotBlank() }
-            .sortedBy { it.expireDate }
+        }.sortedWith(compareBy<ExpiryItem> { it.expireDate.isBlank() }.thenBy { it.expireDate })
     }
 
         fun add(parsed: ParsedExpiry, categoryLabel: String? = null): ExpiryItem {
@@ -63,6 +38,10 @@ class ExpiryRepository(context: Context) {
             saveAll(getAll() + item)
             return item
         }
+
+    fun add(item: ExpiryItem) {
+        saveAll(getAll() + item)
+    }
 
     fun update(item: ExpiryItem) {
         saveAll(getAll().map { if (it.id == item.id) item else it })
@@ -137,30 +116,9 @@ class ExpiryRepository(context: Context) {
 
     private fun saveAll(items: List<ExpiryItem>) {
         val array = JSONArray()
-        items.sortedBy { it.expireDate }.forEach { item ->
-            array.put(
-                JSONObject()
-                    .put("id", item.id)
-                    .put("title", item.title)
-                    .put("expire_date", item.expireDate)
-                    .put("remind_before_days", item.remindBeforeDays)
-                    .put("created_at", item.createdAt)
-                    .put("purchase_date", item.purchaseDate.orEmpty())
-                    .put("warranty_months", item.warrantyMonths)
-                    .put("price", item.price ?: 0)
-                    .put("repeat_rule", item.repeatRule.name)
-                    .put("category", item.category.name)
-                    .put("custom_category", item.customCategory.orEmpty())
-                    .put("additional_remind_before_days", JSONArray(item.additionalRemindBeforeDays))
-                    .put("lifecycle", item.lifecycle.name)
-                    .put("renewal_history", JSONArray(item.renewalHistory))
-            )
-        }
+        items.forEach { array.put(it.toJson()) }
         prefs.edit().putString(KEY_ITEMS, array.toString()).apply()
     }
-
-    private fun JSONArray.toIntList(): List<Int> =
-        (0 until length()).mapNotNull { index -> optInt(index).takeIf { it >= 0 } }
 
     private fun JSONArray.toStringList(): List<String> =
         (0 until length()).mapNotNull { index -> optString(index).takeIf(String::isNotBlank) }

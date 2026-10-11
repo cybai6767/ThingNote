@@ -5,7 +5,7 @@ import org.json.JSONObject
 import java.time.LocalDate
 
 object ExpiryBackup {
-    private const val SCHEMA_VERSION = 2
+    private const val SCHEMA_VERSION = 3
 
     fun encode(items: List<ExpiryItem>, customCategories: List<String> = emptyList(),
         categoryOrder: List<String> = emptyList(), categoryBarOrder: List<String> = emptyList(),
@@ -52,18 +52,24 @@ object ExpiryBackup {
         .put("created_at", createdAt)
         .put("purchase_date", purchaseDate.orEmpty())
         .put("warranty_months", warrantyMonths)
-        .put("price", price ?: 0)
+        .put("price", price ?: JSONObject.NULL)
         .put("repeat_rule", repeatRule.name)
         .put("category", category.name)
         .put("custom_category", customCategory.orEmpty())
         .put("additional_remind_before_days", JSONArray(additionalRemindBeforeDays))
         .put("lifecycle", lifecycle.name)
         .put("renewal_history", JSONArray(renewalHistory))
+        .put("cost_method", costMethod.name)
+        .put("use_count", useCount)
+        .put("note", note)
+        .put("retirement_date", retirementDate.orEmpty())
+        .put("image_base64", imageBase64.orEmpty())
 
     internal fun JSONObject.toExpiryItem(): ExpiryItem {
         val title = getString("title")
         val date = getString("expire_date")
-        LocalDate.parse(date)
+        if (date.isNotBlank()) LocalDate.parse(date)
+        require(title.isNotBlank() && getString("id").isNotBlank()) { "物品名称或 ID 为空" }
         return ExpiryItem(
             id = getString("id"),
             title = title,
@@ -72,7 +78,8 @@ object ExpiryBackup {
             createdAt = optString("created_at", LocalDate.now().toString()),
             purchaseDate = optString("purchase_date").takeIf(String::isNotBlank),
             warrantyMonths = optInt("warranty_months", 0),
-            price = optDouble("price", 0.0).takeIf { it > 0.0 },
+            price = if (isNull("price")) null else optDouble("price", Double.NaN)
+                .takeIf { it.isFinite() && if (has("cost_method")) it >= 0.0 else it > 0.0 },
             repeatRule = RepeatRule.entries.firstOrNull { it.name == optString("repeat_rule") }
                 ?: RepeatRule.None,
             category = ItemCategory.entries.firstOrNull { it.name == optString("category") }
@@ -81,7 +88,12 @@ object ExpiryBackup {
             additionalRemindBeforeDays = optJSONArray("additional_remind_before_days").toIntList(),
             lifecycle = ItemLifecycle.entries.firstOrNull { it.name == optString("lifecycle") }
                 ?: ItemLifecycle.Active,
-            renewalHistory = optJSONArray("renewal_history").toStringList()
+            renewalHistory = optJSONArray("renewal_history").toStringList(),
+            costMethod = CostMethod.entries.firstOrNull { it.name == optString("cost_method") } ?: CostMethod.Time,
+            useCount = optInt("use_count", 0).coerceAtLeast(0),
+            note = optString("note"),
+            retirementDate = optString("retirement_date").takeIf(String::isNotBlank)?.also { LocalDate.parse(it) },
+            imageBase64 = optString("image_base64").takeIf(String::isNotBlank)
         )
     }
 

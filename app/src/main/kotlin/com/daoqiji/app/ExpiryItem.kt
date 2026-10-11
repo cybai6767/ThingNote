@@ -14,6 +14,7 @@ enum class ItemCategory(val label: String) {
 }
 
 enum class ItemLifecycle { Active, Completed }
+enum class CostMethod(val label: String) { Time("按时间"), Count("按次数"), None("不计算") }
 
 data class ExpiryItem(
     val id: String,
@@ -29,13 +30,18 @@ data class ExpiryItem(
     val additionalRemindBeforeDays: List<Int> = emptyList(),
     val lifecycle: ItemLifecycle = ItemLifecycle.Active,
     val renewalHistory: List<String> = emptyList(),
-    val customCategory: String? = null
+    val customCategory: String? = null,
+    val costMethod: CostMethod = CostMethod.Time,
+    val useCount: Int = 0,
+    val note: String = "",
+    val retirementDate: String? = null,
+    val imageBase64: String? = null
 ) {
     val categoryLabel: String get() = customCategory?.takeIf(String::isNotBlank) ?: category.label
-    fun expireLocalDate(): LocalDate = LocalDate.parse(expireDate)
+    fun expireLocalDate(): LocalDate? = expireDate.takeIf(String::isNotBlank)?.let(LocalDate::parse)
 
-    fun nextOccurrence(today: LocalDate = LocalDate.now()): LocalDate {
-        val date = expireLocalDate()
+    fun nextOccurrence(today: LocalDate = LocalDate.now()): LocalDate? {
+        val date = expireLocalDate() ?: return null
         if (repeatRule == RepeatRule.None || !date.isBefore(today)) return date
         val monthDay = MonthDay.from(date)
         fun occurrence(year: Int): LocalDate = runCatching { monthDay.atYear(year) }
@@ -44,8 +50,8 @@ data class ExpiryItem(
         return if (thisYear.isBefore(today)) occurrence(today.year + 1) else thisYear
     }
 
-    fun reminderDate(today: LocalDate = LocalDate.now()): LocalDate =
-        nextOccurrence(today).minusDays(remindBeforeDays.toLong())
+    fun reminderDate(today: LocalDate = LocalDate.now()): LocalDate? =
+        nextOccurrence(today)?.minusDays(remindBeforeDays.toLong())
 
     fun allReminderDays(): List<Int> =
         (listOf(remindBeforeDays) + additionalRemindBeforeDays)
@@ -58,8 +64,9 @@ data class ExpiryItem(
     }
 
     fun leadDaysOn(today: LocalDate = LocalDate.now()): Int? {
-        if (lifecycle != ItemLifecycle.Active) return null
-        val days = ChronoUnit.DAYS.between(today, nextOccurrence(today)).toInt()
+        if (isCompleted(today) || allReminderDays().isEmpty()) return null
+        val date = nextOccurrence(today) ?: return null
+        val days = ChronoUnit.DAYS.between(today, date).toInt()
         return days.takeIf { it == 0 || it in allReminderDays() }
     }
 
@@ -67,20 +74,31 @@ data class ExpiryItem(
         ?.takeIf(String::isNotBlank)
         ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
+    fun retirementLocalDate(): LocalDate? = retirementDate?.takeIf(String::isNotBlank)?.let(LocalDate::parse)
+
+    fun isCompleted(today: LocalDate = LocalDate.now()): Boolean = lifecycle == ItemLifecycle.Completed ||
+        retirementLocalDate()?.let { !it.isAfter(today) } == true
+
+    private fun costEndDate(today: LocalDate): LocalDate = retirementLocalDate()?.let { minOf(it, today) } ?: today
+
     fun heldDays(today: LocalDate = LocalDate.now()): Long? =
-        purchaseLocalDate()?.let { ChronoUnit.DAYS.between(it, today).coerceAtLeast(0) }
+        purchaseLocalDate()?.let { ChronoUnit.DAYS.between(it, costEndDate(today)).coerceAtLeast(0) }
 
     fun dailyCost(today: LocalDate = LocalDate.now()): Double? {
+        if (costMethod != CostMethod.Time) return null
         val amount = price?.takeIf { it.isFinite() && it >= 0 } ?: return null
         val purchased = purchaseLocalDate()?.takeUnless { it.isAfter(today) } ?: return null
-        return amount / ChronoUnit.DAYS.between(purchased, today).coerceAtLeast(1)
+        return amount / ChronoUnit.DAYS.between(purchased, costEndDate(today)).coerceAtLeast(1)
     }
+
+    fun perUseCost(): Double? = price?.takeIf { it.isFinite() && it >= 0 && useCount > 0 && costMethod == CostMethod.Count }
+        ?.div(useCount)
 
     fun computedExpireDate(): LocalDate? =
         purchaseLocalDate()?.takeIf { warrantyMonths > 0 }?.plusMonths(warrantyMonths.toLong())
 
-    fun daysRemaining(today: LocalDate = LocalDate.now()): Long =
-        ChronoUnit.DAYS.between(today, nextOccurrence(today))
+    fun daysRemaining(today: LocalDate = LocalDate.now()): Long? =
+        nextOccurrence(today)?.let { ChronoUnit.DAYS.between(today, it) }
 }
 
 internal fun normalizeCategoryName(name: String): String = name.trim().replace(Regex("""\s+"""), " ")
@@ -109,11 +127,12 @@ enum class ExpiryStatus {
     Safe,
     Soon,
     Urgent,
-    Expired
+    Expired,
+    NoWarranty
 }
 
 fun ExpiryItem.status(today: LocalDate = LocalDate.now()): ExpiryStatus {
-    val days = daysRemaining(today)
+    val days = daysRemaining(today) ?: return ExpiryStatus.NoWarranty
     return when {
         days < 0 -> ExpiryStatus.Expired
         days < 30 -> ExpiryStatus.Urgent

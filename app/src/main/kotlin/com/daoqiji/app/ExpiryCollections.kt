@@ -68,11 +68,11 @@ fun filterExpiryItems(
     val matchesQuery = query.isBlank() || item.title.contains(query.trim(), ignoreCase = true)
     val days = item.daysRemaining(today)
     val matchesFilter = when (filter) {
-        ExpiryFilter.All -> item.lifecycle == ItemLifecycle.Active
-        ExpiryFilter.InWarranty -> item.lifecycle == ItemLifecycle.Active && days >= 0
-        ExpiryFilter.Within30Days -> item.lifecycle == ItemLifecycle.Active && days in 0..30
-        ExpiryFilter.Expired -> item.lifecycle == ItemLifecycle.Active && item.repeatRule == RepeatRule.None && days < 0
-        ExpiryFilter.Completed -> item.lifecycle == ItemLifecycle.Completed
+        ExpiryFilter.All -> !item.isCompleted(today)
+        ExpiryFilter.InWarranty -> !item.isCompleted(today) && days != null && days >= 0
+        ExpiryFilter.Within30Days -> !item.isCompleted(today) && days != null && days in 0..30
+        ExpiryFilter.Expired -> !item.isCompleted(today) && item.repeatRule == RepeatRule.None && days != null && days < 0
+        ExpiryFilter.Completed -> item.isCompleted(today)
     }
     matchesQuery && matchesFilter && (category == null || item.category == category) &&
         (categoryLabel == null || item.categoryLabel == categoryLabel)
@@ -82,6 +82,7 @@ fun groupExpiryItemsByMonth(
     items: List<ExpiryItem>,
     today: LocalDate = LocalDate.now()
 ): Map<YearMonth, List<ExpiryItem>> = items
+    .filter { it.nextOccurrence(today) != null }
     .sortedBy { it.nextOccurrence(today) }
     .groupBy { YearMonth.from(it.nextOccurrence(today)) }
     .toSortedMap()
@@ -90,21 +91,21 @@ fun expiryOverview(
     items: List<ExpiryItem>,
     today: LocalDate = LocalDate.now()
 ): ExpiryOverview = ExpiryOverview(
-    active = items.count { it.lifecycle == ItemLifecycle.Active && it.daysRemaining(today) >= 0 },
+    active = items.count { !it.isCompleted(today) && (it.daysRemaining(today)?.let { days -> days >= 0 } == true) },
     within30Days = items.count {
-        it.lifecycle == ItemLifecycle.Active && it.daysRemaining(today) in 0..30
+        !it.isCompleted(today) && (it.daysRemaining(today)?.let { days -> days in 0..30 } == true)
     },
     expired = items.count {
-        it.lifecycle == ItemLifecycle.Active && it.repeatRule == RepeatRule.None && it.daysRemaining(today) < 0
+        !it.isCompleted(today) && it.repeatRule == RepeatRule.None && (it.daysRemaining(today)?.let { days -> days < 0 } == true)
     },
-    completed = items.count { it.lifecycle == ItemLifecycle.Completed },
+    completed = items.count { it.isCompleted(today) },
     totalPrice = items
-        .filter { it.lifecycle == ItemLifecycle.Active }
+        .filter { !it.isCompleted(today) }
         .sumOf { it.price ?: 0.0 },
-    dailyCost = items.filter { it.lifecycle == ItemLifecycle.Active }
+    dailyCost = items.filter { !it.isCompleted(today) }
         .mapNotNull { it.dailyCost(today) }.let { costs ->
-            if (costs.isEmpty() && items.any { it.lifecycle == ItemLifecycle.Active }) null else costs.sum()
+            if (costs.isEmpty() && items.any { !it.isCompleted(today) }) null else costs.sum()
         },
-    dailyCostItemCount = items.count { it.lifecycle == ItemLifecycle.Active && it.dailyCost(today) != null },
-    unprocessedCount = items.count { it.lifecycle == ItemLifecycle.Active }
+    dailyCostItemCount = items.count { !it.isCompleted(today) && it.dailyCost(today) != null },
+    unprocessedCount = items.count { !it.isCompleted(today) }
 )
