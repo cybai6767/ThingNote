@@ -394,19 +394,7 @@ private fun DaoQiJiApp() {
                     item {
                         CategoryOverview(items = items, savedOrder = categoryOrder, today = today,
                             hiddenCategories = hiddenCategories,
-                            onReorder = { visibleOrder ->
-                                val barOrder = orderedCategoryBar(
-                                    (items.map { it.categoryLabel } + customCategories).distinct()
-                                        .filterNot { it in hiddenCategories }, categoryOrder)
-                                categoryOrder = reorderVisibleCategoryBar(barOrder, visibleOrder)
-                                repository.saveCategoryBarOrder(categoryOrder)
-                            },
-                            onDelete = {
-                                repository.hideCategory(it)
-                                hiddenCategories = repository.getHiddenCategories()
-                                categoryOrder = repository.getCategoryBarOrder()
-                                if (categoryFilter == it) categoryFilter = null
-                            }, onCategory = {
+                            onCategory = {
                             categoryFilter = it
                             expiryFilter = ExpiryFilter.All
                             searchQuery = ""
@@ -677,6 +665,12 @@ private fun ExpiryItemRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium
                 )
+                if (item.note.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("备注：${item.note.trim()}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium)
+                }
             }
             Spacer(Modifier.width(4.dp))
             Icon(

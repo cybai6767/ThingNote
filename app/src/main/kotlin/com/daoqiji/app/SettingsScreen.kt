@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +43,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import java.time.LocalTime
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import android.text.format.Formatter
 
 @Composable
 internal fun SettingsContent(
@@ -60,6 +65,9 @@ internal fun SettingsContent(
     var showTime by remember { mutableStateOf(false) }
     var showPrivacy by remember { mutableStateOf(false) }
     var showFeedback by remember { mutableStateOf(false) }
+    var clearingCache by remember { mutableStateOf(false) }
+    var cacheResult by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val version = remember {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty().removeSuffix("-debug")
     }
@@ -97,8 +105,23 @@ internal fun SettingsContent(
         SettingsHeading("数据")
         SettingsRow("导出本地备份", "", onExportBackup)
         SettingsRow("从备份恢复", "", onImportBackup)
+        SettingsRow("清理缓存", if (clearingCache) "清理中…" else "", {
+            if (!clearingCache) scope.launch {
+                clearingCache = true
+                cacheResult = runCatching { withContext(Dispatchers.IO) { clearAppCache(context.applicationContext) } }
+                    .fold(onSuccess = {
+                        val amount = Formatter.formatFileSize(context, it.clearedBytes)
+                        when {
+                            it.failedFiles > 0 -> "已释放 $amount，部分缓存正在使用，暂未清除。"
+                            it.clearedBytes == 0L -> "暂无可清理的缓存。"
+                            else -> "已释放 $amount 缓存空间。"
+                        }
+                    }, onFailure = { "缓存清理失败，请稍后重试。" })
+                clearingCache = false
+            }
+        })
         Text(
-            "备份文件由你自行保存，恢复时会替换当前事项。",
+            "备份文件由你自行保存，恢复时会替换当前事项。清理缓存仅删除临时文件，保留物品、图片、备注和设置。",
             modifier = Modifier.padding(top = 10.dp, bottom = 12.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -138,6 +161,12 @@ internal fun SettingsContent(
             },
             dismissButton = { TextButton(onClick = { showDays = false }) { Text("取消") } }
         )
+    }
+
+    cacheResult?.let { message ->
+        AlertDialog(onDismissRequest = { cacheResult = null }, title = { Text("清理缓存") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { cacheResult = null }) { Text("确定") } })
     }
 
     if (showTime) {
